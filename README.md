@@ -11,6 +11,12 @@ Client-API (LCU) – es greift nicht ins laufende Spiel ein.
 
 ## Nutzung
 
+**Am einfachsten (Windows):** Doppelklick auf `start.bat` und im Menü auswählen.
+Liegt League nicht unter `C:\Riot Games\League of Legends`, trage den Pfad oben in
+der `start.bat` bei `LOL_PATH` ein.
+
+Oder über die Kommandozeile:
+
 ```bash
 python dodge.py                    # sofort dodgen
 python dodge.py --status           # Phase & Restzeit anzeigen
