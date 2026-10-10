@@ -20,7 +20,7 @@ Oder über die Kommandozeile:
 ```bash
 python dodge.py                    # sofort dodgen
 python dodge.py --status           # Phase & Restzeit anzeigen
-python dodge.py --last-second      # automatisch ~1,5 s vor Spielstart dodgen
+python dodge.py --last-second      # automatisch ~3 s vor Spielstart dodgen
 python dodge.py --last-second --margin 3
 python dodge.py --watch            # läuft im Hintergrund, Enter = dodge
 python dodge.py --path "D:\Games\League of Legends"
@@ -45,6 +45,12 @@ diese erscheinen als „(verborgen)“. Das Tool umgeht diese Sperre bewusst nic
 Den Installationsordner kannst du auch über die Umgebungsvariable `LOL_PATH` setzen.
 Wird keine `lockfile` gefunden, liest das Script Port und Token direkt aus dem
 `LeagueClientUx`-Prozess.
+
+### Falls der Dodge fehlschlägt
+
+Liefert der Client beim Dodgen einen Fehler (z. B. `HTTP 500 RPC_ERROR`), bietet das
+Script an, stattdessen den League Client zu beenden – das zählt ebenfalls als Dodge.
+Mit `--quit-fallback` passiert das ohne Nachfrage (im Menü bei Last-Second aktiv).
 
 ## Wichtig
 

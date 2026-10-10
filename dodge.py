@@ -29,14 +29,15 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
 DODGE_ENDPOINT = (
     "/lol-login/v1/session/invoke"
-    "?destination=lcdsServiceProxy&method=call"
-    '&args=["","teambuilder-draft","quitV2",""]'
+    "?destination=lcdsServiceProxy&method=call&args="
+    + urllib.parse.quote('["","teambuilder-draft","quitV2",""]')
 )
 
 DEFAULT_INSTALL_PATHS = [
@@ -160,8 +161,20 @@ class LcuClient:
         me = self.request("GET", "/lol-summoner/v1/current-summoner") or {}
         return me.get("gameName") or me.get("displayName") or "?"
 
-    def dodge(self) -> None:
-        self.request("POST", DODGE_ENDPOINT, body={})
+    def dodge(self, attempts: int = 3) -> None:
+        """Verlässt Champ Select; wiederholt kurz, falls der Server gerade hakt."""
+        for attempt in range(attempts):
+            try:
+                self.request("POST", DODGE_ENDPOINT, body={})
+                return
+            except LcuError:
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(0.2)
+
+    def quit_client(self) -> None:
+        """Beendet den League Client komplett – zählt ebenfalls als Dodge."""
+        self.request("POST", "/process-control/v1/process/quit")
 
 
 # ---------------------------------------------------------------------------
@@ -185,11 +198,29 @@ def is_final_phase(session: dict) -> bool:
     return (session.get("timer") or {}).get("phase") == "FINALIZATION"
 
 
-def do_dodge(client: LcuClient) -> bool:
+def ask_yes(question: str) -> bool:
+    try:
+        return input(f"{question} [j/N] ").strip().lower() in {"j", "ja", "y", "yes"}
+    except EOFError:
+        return False
+
+
+def do_dodge(client: LcuClient, quit_fallback: bool | None = None) -> bool:
+    """Dodged. quit_fallback: True = Client bei Fehler beenden, None = nachfragen."""
     if client.gameflow_phase() != "ChampSelect":
         print("Du bist gerade nicht in der Champion-Auswahl.")
         return False
-    client.dodge()
+    try:
+        client.dodge()
+    except LcuError as e:
+        print(f"Normaler Dodge fehlgeschlagen: {e}")
+        if quit_fallback is None:
+            quit_fallback = ask_yes("Stattdessen den League Client beenden (zählt auch als Dodge)?")
+        if not quit_fallback:
+            return False
+        client.quit_client()
+        print("League Client wird beendet – gedodged! ✔ (Client danach neu starten)")
+        return True
     time.sleep(0.5)
     if client.gameflow_phase() == "ChampSelect":
         print("Dodge-Anfrage gesendet, aber Champ Select ist noch aktiv.")
@@ -211,7 +242,7 @@ def cmd_status(client: LcuClient) -> None:
             print(f"Restzeit: {left:.1f}s")
 
 
-def cmd_last_second(client: LcuClient, margin: float) -> None:
+def cmd_last_second(client: LcuClient, margin: float, quit_fallback: bool) -> None:
     """Wartet bis zur Finalisierungsphase und dodged `margin` Sekunden vor Ende."""
     print(f"Warte auf Champ Select ... (Dodge {margin:.1f}s vor Spielstart, Strg+C = Abbruch)")
     while True:
@@ -227,8 +258,8 @@ def cmd_last_second(client: LcuClient, margin: float) -> None:
             print(f"\rFinalisierung – noch {left:5.1f}s ", end="", flush=True)
             if left <= margin:
                 print()
-                if do_dodge(client):
-                    return
+                do_dodge(client, quit_fallback)
+                return
         time.sleep(0.1 if left is not None and left < margin + 2 else 0.5)
 
 
@@ -249,7 +280,11 @@ def cmd_watch(client: LcuClient) -> None:
             time.sleep(1)
 
     threading.Thread(target=monitor, daemon=True).start()
-    for line in sys.stdin:
+    while True:
+        try:
+            line = input()
+        except EOFError:
+            return
         if line.strip().lower() in {"q", "quit", "exit"}:
             return
         try:
@@ -268,8 +303,10 @@ def main() -> int:
                       help="automatisch kurz vor Spielstart dodgen")
     mode.add_argument("--watch", action="store_true",
                       help="dauerhaft laufen, Enter drücken zum Dodgen")
-    parser.add_argument("--margin", type=float, default=1.5,
-                        help="Sekunden vor Ende für --last-second (Standard: 1.5)")
+    parser.add_argument("--margin", type=float, default=3.0,
+                        help="Sekunden vor Ende für --last-second (Standard: 3)")
+    parser.add_argument("--quit-fallback", action="store_true",
+                        help="Client beenden, falls der normale Dodge fehlschlägt")
     parser.add_argument("--games", type=int, default=20,
                         help="Anzahl letzter Spiele für --team (Standard: 20)")
     parser.add_argument("--path", default=os.environ.get("LOL_PATH"),
@@ -284,11 +321,11 @@ def main() -> int:
             from team_info import cmd_team
             cmd_team(client, args.games)
         elif args.last_second:
-            cmd_last_second(client, args.margin)
+            cmd_last_second(client, args.margin, args.quit_fallback)
         elif args.watch:
             cmd_watch(client)
         else:
-            return 0 if do_dodge(client) else 1
+            return 0 if do_dodge(client, True if args.quit_fallback else None) else 1
     except LcuError as e:
         print(f"Fehler: {e}", file=sys.stderr)
         return 1

@@ -39,7 +39,7 @@ set /p "choice=Auswahl: "
 
 if "%choice%"=="1" set "ARGS=--team"        & goto run
 if "%choice%"=="2" set "ARGS="              & goto run
-if "%choice%"=="3" set "ARGS=--last-second" & goto run
+if "%choice%"=="3" set "ARGS=--last-second --quit-fallback" & goto run
 if "%choice%"=="4" set "ARGS=--watch"       & goto run
 if "%choice%"=="5" set "ARGS=--status"      & goto run
 if "%choice%"=="0" exit /b 0
