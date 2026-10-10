@@ -18,7 +18,23 @@ python dodge.py --last-second      # automatisch ~1,5 s vor Spielstart dodgen
 python dodge.py --last-second --margin 3
 python dodge.py --watch            # läuft im Hintergrund, Enter = dodge
 python dodge.py --path "D:\Games\League of Legends"
+python dodge.py --team             # Infos zu den Mitspielern
+python dodge.py --team --games 50  # Statistik über die letzten 50 Spiele
 ```
+
+### Mitspieler-Infos (`--team`)
+
+Wartet bei Bedarf auf die Champion-Auswahl und zeigt dann pro Mitspieler:
+
+- Riot-ID, Position und gewählten Champion
+- Solo/Duo-Rang mit LP
+- Winrate und KDA der letzten Spiele
+- Bilanz auf dem aktuell gewählten Champion
+- die 3 meistgespielten Champions
+- op.gg-Link
+
+In Ranked Solo/Duo blendet Riot die Namen der Mitspieler bis zum Spielstart aus –
+diese erscheinen als „(verborgen)“. Das Tool umgeht diese Sperre bewusst nicht.
 
 Den Installationsordner kannst du auch über die Umgebungsvariable `LOL_PATH` setzen.
 Wird keine `lockfile` gefunden, liest das Script Port und Token direkt aus dem

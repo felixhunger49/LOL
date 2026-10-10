@@ -10,6 +10,7 @@ Nutzung:
     python dodge.py --last-second   # warten und kurz vor Ende des Timers dodgen
     python dodge.py --watch         # im Hintergrund laufen, Enter = dodge
     python dodge.py --status        # nur aktuellen Status anzeigen
+    python dodge.py --team          # Infos zu den Mitspielern anzeigen
 
 Hinweis: Ein Dodge zählt wie ein normaler Queue-Dodge (LP-Verlust / Wartezeit).
 """
@@ -261,12 +262,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="League of Legends Champ-Select Dodge Tool")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--status", action="store_true", help="nur Status anzeigen")
+    mode.add_argument("--team", action="store_true",
+                      help="Infos zu den Mitspielern in Champ Select anzeigen")
     mode.add_argument("--last-second", action="store_true",
                       help="automatisch kurz vor Spielstart dodgen")
     mode.add_argument("--watch", action="store_true",
                       help="dauerhaft laufen, Enter drücken zum Dodgen")
     parser.add_argument("--margin", type=float, default=1.5,
                         help="Sekunden vor Ende für --last-second (Standard: 1.5)")
+    parser.add_argument("--games", type=int, default=20,
+                        help="Anzahl letzter Spiele für --team (Standard: 20)")
     parser.add_argument("--path", default=os.environ.get("LOL_PATH"),
                         help="Installationsordner von League of Legends")
     args = parser.parse_args()
@@ -275,6 +280,9 @@ def main() -> int:
         client = LcuClient(find_credentials(args.path))
         if args.status:
             cmd_status(client)
+        elif args.team:
+            from team_info import cmd_team
+            cmd_team(client, args.games)
         elif args.last_second:
             cmd_last_second(client, args.margin)
         elif args.watch:
