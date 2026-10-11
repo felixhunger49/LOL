@@ -46,11 +46,14 @@ Den Installationsordner kannst du auch über die Umgebungsvariable `LOL_PATH` se
 Wird keine `lockfile` gefunden, liest das Script Port und Token direkt aus dem
 `LeagueClientUx`-Prozess.
 
-### Falls der Dodge fehlschlägt
+### Wie gedodged wird
 
-Liefert der Client beim Dodgen einen Fehler (z. B. `HTTP 500 RPC_ERROR`), bietet das
-Script an, stattdessen den League Client zu beenden – das zählt ebenfalls als Dodge.
-Mit `--quit-fallback` passiert das ohne Nachfrage (im Menü bei Last-Second aktiv).
+Riot hat den früheren Dodge-Aufruf (`teambuilder-draft quitV2`) abgeschaltet – er
+liefert nur noch `RPC_ERROR`. Das Script dodged deshalb, indem es den League Client
+sauber beendet; das zählt genauso als Dodge. Mit `--restart` startet es League
+danach automatisch neu (im Menü der `start.bat` immer aktiv).
+
+`--method auto` versucht zuerst den alten Aufruf und fragt bei Fehler nach.
 
 ## Wichtig
 

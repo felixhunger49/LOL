@@ -161,16 +161,9 @@ class LcuClient:
         me = self.request("GET", "/lol-summoner/v1/current-summoner") or {}
         return me.get("gameName") or me.get("displayName") or "?"
 
-    def dodge(self, attempts: int = 3) -> None:
-        """Verlässt Champ Select; wiederholt kurz, falls der Server gerade hakt."""
-        for attempt in range(attempts):
-            try:
-                self.request("POST", DODGE_ENDPOINT, body={})
-                return
-            except LcuError:
-                if attempt == attempts - 1:
-                    raise
-                time.sleep(0.2)
+    def dodge(self) -> None:
+        """Verlässt Champ Select über den alten LCDS-Aufruf (von Riot teils abgeschaltet)."""
+        self.request("POST", DODGE_ENDPOINT, body={})
 
     def quit_client(self) -> None:
         """Beendet den League Client komplett – zählt ebenfalls als Dodge."""
@@ -205,22 +198,68 @@ def ask_yes(question: str) -> bool:
         return False
 
 
-def do_dodge(client: LcuClient, quit_fallback: bool | None = None) -> bool:
-    """Dodged. quit_fallback: True = Client bei Fehler beenden, None = nachfragen."""
+def find_riot_client() -> Path | None:
+    """Sucht RiotClientServices.exe, um League nach dem Dodge neu zu starten."""
+    candidates = []
+    installs = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "Riot Games" / "RiotClientInstalls.json"
+    try:
+        data = json.loads(installs.read_text(encoding="utf-8"))
+        candidates += [data.get("rc_default"), data.get("rc_live")]
+    except (OSError, ValueError):
+        pass
+    candidates += [r"C:\Riot Games\Riot Client\RiotClientServices.exe",
+                   r"D:\Riot Games\Riot Client\RiotClientServices.exe"]
+    for c in candidates:
+        if c and Path(c).is_file():
+            return Path(c)
+    return None
+
+
+def restart_league(install_dir: str | None) -> None:
+    """Wartet, bis der Client zu ist, und startet League neu."""
+    exe = find_riot_client()
+    if exe is None:
+        print("Riot Client nicht gefunden – bitte League selbst neu starten.")
+        return
+    print("Warte, bis der Client geschlossen ist ...")
+    for _ in range(30):
+        time.sleep(1)
+        if _credentials_from_lockfile(install_dir) is None and _credentials_from_process() is None:
+            break
+    time.sleep(2)
+    subprocess.Popen([str(exe), "--launch-product=league_of_legends", "--launch-patchline=live"])
+    print("League wird neu gestartet.")
+
+
+def do_dodge(client: LcuClient, method: str = "quit", restart_dir: str | None = None,
+             restart: bool = False) -> bool:
+    """Dodged.
+
+    method "quit": League Client beenden (funktioniert immer, zählt als Dodge).
+    method "auto": erst den alten LCDS-Aufruf versuchen, bei Fehler nachfragen.
+    """
     if client.gameflow_phase() != "ChampSelect":
         print("Du bist gerade nicht in der Champion-Auswahl.")
         return False
-    try:
-        client.dodge()
-    except LcuError as e:
-        print(f"Normaler Dodge fehlgeschlagen: {e}")
-        if quit_fallback is None:
-            quit_fallback = ask_yes("Stattdessen den League Client beenden (zählt auch als Dodge)?")
-        if not quit_fallback:
-            return False
-        client.quit_client()
-        print("League Client wird beendet – gedodged! ✔ (Client danach neu starten)")
-        return True
+    if method == "auto":
+        try:
+            client.dodge()
+        except LcuError as e:
+            print(f"Normaler Dodge fehlgeschlagen: {e}")
+            if not ask_yes("Stattdessen den League Client beenden (zählt auch als Dodge)?"):
+                return False
+        else:
+            return _confirm_left(client)
+    client.quit_client()
+    print("League Client wird beendet – gedodged! ✔")
+    if restart:
+        restart_league(restart_dir)
+    else:
+        print("Starte League danach einfach neu.")
+    return True
+
+
+def _confirm_left(client: LcuClient) -> bool:
     time.sleep(0.5)
     if client.gameflow_phase() == "ChampSelect":
         print("Dodge-Anfrage gesendet, aber Champ Select ist noch aktiv.")
@@ -242,7 +281,7 @@ def cmd_status(client: LcuClient) -> None:
             print(f"Restzeit: {left:.1f}s")
 
 
-def cmd_last_second(client: LcuClient, margin: float, quit_fallback: bool) -> None:
+def cmd_last_second(client: LcuClient, margin: float, dodge_args: dict) -> None:
     """Wartet bis zur Finalisierungsphase und dodged `margin` Sekunden vor Ende."""
     print(f"Warte auf Champ Select ... (Dodge {margin:.1f}s vor Spielstart, Strg+C = Abbruch)")
     while True:
@@ -258,12 +297,12 @@ def cmd_last_second(client: LcuClient, margin: float, quit_fallback: bool) -> No
             print(f"\rFinalisierung – noch {left:5.1f}s ", end="", flush=True)
             if left <= margin:
                 print()
-                do_dodge(client, quit_fallback)
+                do_dodge(client, **dodge_args)
                 return
         time.sleep(0.1 if left is not None and left < margin + 2 else 0.5)
 
 
-def cmd_watch(client: LcuClient) -> None:
+def cmd_watch(client: LcuClient, dodge_args: dict) -> None:
     """Läuft dauerhaft; Enter drücken dodged sofort."""
     print("Watch-Modus aktiv. [Enter] = dodge, 'q' + [Enter] = beenden.")
     state = {"phase": None}
@@ -288,7 +327,8 @@ def cmd_watch(client: LcuClient) -> None:
         if line.strip().lower() in {"q", "quit", "exit"}:
             return
         try:
-            do_dodge(client)
+            if do_dodge(client, **dodge_args):
+                return
         except LcuError as e:
             print(f"Fehler: {e}")
 
@@ -305,14 +345,17 @@ def main() -> int:
                       help="dauerhaft laufen, Enter drücken zum Dodgen")
     parser.add_argument("--margin", type=float, default=3.0,
                         help="Sekunden vor Ende für --last-second (Standard: 3)")
-    parser.add_argument("--quit-fallback", action="store_true",
-                        help="Client beenden, falls der normale Dodge fehlschlägt")
+    parser.add_argument("--method", choices=["quit", "auto"], default="quit",
+                        help="quit = Client beenden (Standard), auto = erst alten Dodge-Aufruf versuchen")
+    parser.add_argument("--restart", action="store_true",
+                        help="League nach dem Dodge automatisch neu starten")
     parser.add_argument("--games", type=int, default=20,
                         help="Anzahl letzter Spiele für --team (Standard: 20)")
     parser.add_argument("--path", default=os.environ.get("LOL_PATH"),
                         help="Installationsordner von League of Legends")
     args = parser.parse_args()
 
+    dodge_args = {"method": args.method, "restart": args.restart, "restart_dir": args.path}
     try:
         client = LcuClient(find_credentials(args.path))
         if args.status:
@@ -321,11 +364,11 @@ def main() -> int:
             from team_info import cmd_team
             cmd_team(client, args.games)
         elif args.last_second:
-            cmd_last_second(client, args.margin, args.quit_fallback)
+            cmd_last_second(client, args.margin, dodge_args)
         elif args.watch:
-            cmd_watch(client)
+            cmd_watch(client, dodge_args)
         else:
-            return 0 if do_dodge(client, True if args.quit_fallback else None) else 1
+            return 0 if do_dodge(client, **dodge_args) else 1
     except LcuError as e:
         print(f"Fehler: {e}", file=sys.stderr)
         return 1
