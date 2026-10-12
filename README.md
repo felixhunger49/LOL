@@ -59,3 +59,7 @@ danach automatisch neu (im Menü der `start.bat` immer aktiv).
 
 - Ein Dodge wird ganz normal bestraft (Queue-Sperre, in Ranked LP-Verlust).
 - Nutzung auf eigene Verantwortung.
+
+---
+
+Außerdem im Repo: [`stickerei/`](stickerei/README.md) – Bilder in Stickdateien (SVG) umwandeln.
