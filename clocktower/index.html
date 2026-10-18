@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14111c">
+  <title>Clocktower Rollen</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <span class="logo">🕰️</span>
+    <h1 id="title">Clocktower</h1>
+  </header>
+
+  <main id="view"></main>
+
+  <nav class="tabbar">
+    <a href="#/rolle" data-tab="rolle"><span>🎭</span>Meine Rolle</a>
+    <a href="#/sl" data-tab="sl"><span>📜</span>Spielleiter</a>
+    <a href="#/rollen" data-tab="rollen"><span>📖</span>Rollen</a>
+    <a href="#/anleitung" data-tab="anleitung"><span>❓</span>Anleitung</a>
+  </nav>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-box">
+      <button class="modal-close" aria-label="Schließen">✕</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <script src="vendor/qrcode.js"></script>
+  <script src="js/roles.js"></script>
+  <script src="js/guide.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
