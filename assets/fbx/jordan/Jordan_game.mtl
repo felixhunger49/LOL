@@ -1,0 +1,6 @@
+newmtl Jordan_game
+Kd 1 1 1
+Ka 0 0 0
+Ks 0 0 0
+map_Kd Jordan_game_color.png
+norm Jordan_game_normal.png
