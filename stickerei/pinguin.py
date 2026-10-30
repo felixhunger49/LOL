@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Stickdatei (SVG) fuer den Applikations-Pinguin aus beispiele/pinguin.jpg.
+"""Stickdatei (SVG fuer Inkscape/Ink/Stitch) fuer den Applikations-Pinguin.
 
 Stil: Applikation – die Stoffflaechen (Koerper, Gesicht, Bauch, Halstuch,
-Fuesse) werden nicht ausgestickt, nur ihre Raender mit Satinstich.
-Schnabel und Augen bekommen Fuellstich, die Augenbrauen eine schmale Raupe.
+Fuesse) werden nicht ausgestickt, ihre Raender werden Satinsaeulen.
+Schnabel und Augen sind Fuellflaechen, die Augenbrauen schmale Satinsaeulen.
+Die Stiche selbst berechnet Ink/Stitch beim Export.
 
 Benoetigt: pillow, numpy, scipy, opencv-python-headless
 """
@@ -17,7 +18,7 @@ from PIL import Image, ImageDraw
 from scipy import ndimage
 
 import stiche
-from bild_zu_stick import fill_region, merge_close_blocks, order_blocks, to_svg
+from inkstitch import Fuellung, Satin, dokument, konturen
 
 HIER = Path(__file__).parent
 
@@ -111,69 +112,68 @@ def segmentieren(path):
 
 
 # ---------------------------------------------------------------------------
-# Stiche erzeugen
+# Ink/Stitch-Objekte erzeugen
 # ---------------------------------------------------------------------------
 
 class Muster:
     def __init__(self, mm_per_px, ursprung):
         self.mm = mm_per_px
         self.ursprung = np.asarray(ursprung, dtype=float)
-        self.ebenen = []  # (farbe, [pfade])
+        self.ebenen = []  # (name, farbe, [objekte])
 
     def px_zu_mm(self, pts):
         return (np.asarray(pts, dtype=float) - self.ursprung) * self.mm
 
-    def add(self, farbe, pfade):
-        pfade = [stiche.lock(p) for p in pfade if len(p) > 1]
-        if self.ebenen and self.ebenen[-1][0] == farbe:
-            self.ebenen[-1][1].extend(pfade)
+    def add(self, name, farbe, objekte):
+        """Haengt Objekte an; gleiche Farbe hintereinander = gleiche Ebene."""
+        if self.ebenen and self.ebenen[-1][1] == farbe:
+            self.ebenen[-1][2].extend(objekte)
         else:
-            self.ebenen.append((farbe, pfade))
+            self.ebenen.append((name, farbe, list(objekte)))
 
     # -- Satinrand einer Flaeche, verdeckte Abschnitte werden ausgelassen --
-    def rand(self, maske, breite, verdeckt=None):
-        konturen, _ = cv2.findContours(maske.astype(np.uint8), cv2.RETR_EXTERNAL,
-                                       cv2.CHAIN_APPROX_NONE)
-        pfade = []
-        for k in konturen:
+    def rand(self, maske, farbe, breite, verdeckt=None):
+        ks, _ = cv2.findContours(maske.astype(np.uint8), cv2.RETR_EXTERNAL,
+                                 cv2.CHAIN_APPROX_NONE)
+        objekte = []
+        for k in ks:
             pts = stiche.resample(self.px_zu_mm(k[:, 0, :]), 0.3, closed=True)
-            pts = stiche.smooth(pts, 7, closed=True)
-            if verdeckt is None:
-                pfade.append(stiche.satin(pts, breite, closed=True))
-                continue
-            px = np.round(pts / self.mm + self.ursprung).astype(int)
-            px[:, 0] = px[:, 0].clip(0, verdeckt.shape[1] - 1)
-            px[:, 1] = px[:, 1].clip(0, verdeckt.shape[0] - 1)
-            frei = ~verdeckt[px[:, 1], px[:, 0]]
+            pts = stiche.smooth(pts, 9, closed=True)
+            frei = np.ones(len(pts), bool)
+            if verdeckt is not None:
+                px = np.round(pts / self.mm + self.ursprung).astype(int)
+                px[:, 0] = px[:, 0].clip(0, verdeckt.shape[1] - 1)
+                px[:, 1] = px[:, 1].clip(0, verdeckt.shape[0] - 1)
+                frei = ~verdeckt[px[:, 1], px[:, 0]]
             if frei.all():
-                pfade.append(stiche.satin(pts, breite, closed=True))
+                objekte.append(Satin(farbe, pts, breite, geschlossen=True))
                 continue
             # so drehen, dass die Kontur an einem verdeckten Punkt beginnt
             start = int(np.argmin(frei))
             pts, frei = np.roll(pts, -start, 0), np.roll(frei, -start)
             kanten = np.flatnonzero(np.diff(np.append(frei, False).astype(int)))
             for a, b in zip(kanten[::2] + 1, kanten[1::2] + 1):
-                stueck = pts[a:b]
-                if len(stueck) * 0.3 >= 2.0:
-                    pfade.append(stiche.satin(stueck, breite))
-        return pfade
+                if (b - a) * 0.3 >= 2.0:
+                    objekte.append(Satin(farbe, pts[a:b], breite))
+        return objekte
 
     # -- Naht entlang einer von Hand gesetzten Linie --
-    def naht(self, punkte_px, breite):
+    def naht(self, farbe, punkte_px, breite):
         pts = stiche.resample(self.px_zu_mm(punkte_px), 0.3)
-        return stiche.satin(stiche.smooth(pts, 7), breite)
+        return Satin(farbe, stiche.smooth(pts, 7), breite)
 
-    # -- Fuellstich (Tatami) --
-    def fuellung(self, maske, einzug_mm=0.3):
-        r = max(1, round(einzug_mm / self.mm))
-        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
-        maske = cv2.erode(maske.astype(np.uint8), k).astype(bool)
-        bloecke = fill_region(maske, 0.4 / self.mm, 3.0 / self.mm, 0.6 / self.mm)
-        bloecke = merge_close_blocks(order_blocks(bloecke), 1.0 / self.mm)
-        return [self.px_zu_mm(b) for b in bloecke if len(b) > 1]
+    # -- Fuellflaeche, etwas eingezogen, damit der Satinrand sie abdeckt --
+    def fuellung(self, maske, farbe, einzug_mm=0.3, winkel=None):
+        r = round(einzug_mm / self.mm)
+        if r > 0:
+            k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
+            maske = cv2.erode(maske.astype(np.uint8), k)
+        params = {"angle": winkel} if winkel is not None else None
+        return Fuellung(farbe, konturen(maske, self.mm, self.ursprung,
+                                        min_flaeche_mm2=0.2), params)
 
-    # -- schmale Raupe ueber einen duennen, eher waagrechten Strich --
-    def strich(self, maske):
+    # -- schmale Satinsaeule ueber einen duennen, eher waagrechten Strich --
+    def strich(self, maske, farbe):
         ys, xs = np.nonzero(maske)
         mitte, breite = [], []
         for x in range(xs.min() + 1, xs.max()):
@@ -185,7 +185,7 @@ class Muster:
         breite = np.convolve(np.pad(breite, 4, mode="edge"),
                              np.ones(9) / 9, mode="valid")
         breite = np.clip(breite + 0.2, 0.6, 2.5)
-        return stiche.satin(self.px_zu_mm(mitte), breite)
+        return Satin(farbe, self.px_zu_mm(mitte), breite, sprossenabstand=4)
 
 
 def erzeugen(bild, hoehe_mm, rand_mm):
@@ -209,35 +209,38 @@ def erzeugen(bild, hoehe_mm, rand_mm):
     fuesse = m["fuesse"][0] | m["fuesse"][1]
 
     # Reihenfolge = Stickreihenfolge, von unten nach oben
-    muster.add(GRAU, muster.rand(m["koerper"], 2.0,
-                                 deckel(m["halstuch"], fuesse)))
-    muster.add(GRAU, [muster.naht(NAEHTE["fluegel_links"], 1.6),
-                      muster.naht(NAEHTE["fluegel_rechts"], 1.6)])
+    muster.add("Grau - Koerperrand", GRAU,
+               muster.rand(m["koerper"], GRAU, 2.0, deckel(m["halstuch"], fuesse)))
+    muster.add("", GRAU, [muster.naht(GRAU, NAEHTE["fluegel_links"], 1.6),
+                          muster.naht(GRAU, NAEHTE["fluegel_rechts"], 1.6)])
 
-    muster.add(CREME, muster.rand(m["bauch"], 1.8, deckel(m["halstuch"], fuesse)))
+    muster.add("Creme - Bauch und Gesicht", CREME,
+               muster.rand(m["bauch"], CREME, 1.8, deckel(m["halstuch"], fuesse)))
     for teil in m["gesicht"]:
-        muster.add(CREME, muster.rand(teil, 1.8,
-                                      deckel(m["halstuch"], m["schnabel"])))
+        muster.add("", CREME, muster.rand(teil, CREME, 1.8,
+                                          deckel(m["halstuch"], m["schnabel"])))
 
-    muster.add(BLAU, muster.rand(m["halstuch"], 1.8))
-    muster.add(BLAU, [muster.naht(NAEHTE["knoten"], 1.4)])
+    muster.add("Blau - Halstuch", BLAU, muster.rand(m["halstuch"], BLAU, 1.8))
+    muster.add("", BLAU, [muster.naht(BLAU, NAEHTE["knoten"], 1.4)])
 
     for fuss in m["fuesse"]:
-        muster.add(ORANGE, muster.rand(fuss, 2.0))
-    muster.add(ORANGE, [muster.naht(NAEHTE[n], 1.2) for n in
-                        ("zehe_links_1", "zehe_links_2",
-                         "zehe_rechts_1", "zehe_rechts_2")])
-    muster.add(ORANGE, muster.fuellung(m["schnabel"]))
-    muster.add(ORANGE, muster.rand(m["schnabel"], 1.4))
+        muster.add("Orange - Fuesse und Schnabel", ORANGE,
+                   muster.rand(fuss, ORANGE, 2.0))
+    muster.add("", ORANGE, [muster.naht(ORANGE, NAEHTE[n], 1.2) for n in
+                            ("zehe_links_1", "zehe_links_2",
+                             "zehe_rechts_1", "zehe_rechts_2")])
+    muster.add("", ORANGE, [muster.fuellung(m["schnabel"], ORANGE, winkel=45)])
+    muster.add("", ORANGE, muster.rand(m["schnabel"], ORANGE, 1.4))
 
     for auge, licht in zip(m["augen"], m["lichter"]):
-        muster.add(SCHWARZ, muster.fuellung(auge & ~licht))
-        muster.add(SCHWARZ, muster.rand(auge, 1.0))
+        muster.add("Schwarz - Augen und Brauen", SCHWARZ,
+                   [muster.fuellung(auge & ~licht, SCHWARZ, winkel=45)])
+        muster.add("", SCHWARZ, muster.rand(auge, SCHWARZ, 1.0))
     for braue in m["brauen"]:
-        muster.add(SCHWARZ, [muster.strich(braue)])
+        muster.add("", SCHWARZ, [muster.strich(braue, SCHWARZ)])
 
-    for licht in m["lichter"]:
-        muster.add(WEISS, muster.fuellung(licht, einzug_mm=0.0))
+    muster.add("Weiss - Lichtpunkte", WEISS,
+               [muster.fuellung(licht, WEISS, einzug_mm=0) for licht in m["lichter"]])
 
     return muster, breite, hoehe
 
@@ -247,15 +250,19 @@ def erzeugen(bild, hoehe_mm, rand_mm):
 # ---------------------------------------------------------------------------
 
 def vorschau(muster, breite, hoehe, path, px_per_mm=12):
-    """Zeichnet die Stiche als Faeden auf Stoff (PNG)."""
+    """Zeichnet die Objekte so, wie sie gestickt werden (ohne Einzelstiche)."""
     img = Image.new("RGB", (round(breite * px_per_mm), round(hoehe * px_per_mm)),
                     (244, 241, 234))
     d = ImageDraw.Draw(img)
-    faden = max(1, round(0.3 * px_per_mm))
-    for farbe, pfade in muster.ebenen:
-        for p in pfade:
-            d.line([tuple(q * px_per_mm) for q in p], fill=farbe, width=faden,
-                   joint="curve")
+    for _, farbe, objekte in muster.ebenen:
+        for obj in objekte:
+            if isinstance(obj, Satin):
+                band = np.vstack([obj.links, obj.rechts[::-1]]) * px_per_mm
+                d.polygon([tuple(q) for q in band], fill=farbe)
+            else:
+                for i, k in enumerate(obj.konturen):
+                    d.polygon([tuple(q * px_per_mm) for q in k],
+                              fill=farbe if i == 0 else (244, 241, 234))
     img.save(path)
 
 
@@ -270,20 +277,16 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     muster, breite, hoehe = erzeugen(args.bild, args.hoehe, args.rand)
-    ebenen = [(f, [[tuple(q) for q in pf] for pf in pfade])
-              for f, pfade in muster.ebenen]
     out = Path(args.ausgabe)
-    out.write_text(to_svg(ebenen, breite, hoehe, 0.3))
+    out.write_text(dokument([(name, obj) for name, _, obj in muster.ebenen],
+                            breite, hoehe))
     vorschau(muster, breite, hoehe, out.with_suffix(".png"))
 
-    stiche_ges = sum(len(pf) for _, pfade in muster.ebenen for pf in pfade)
     print(f"Gespeichert: {out} (+ Vorschau {out.with_suffix('.png').name})")
     print(f"Groesse:     {breite:.1f} x {hoehe:.1f} mm")
-    print(f"Stiche:      {stiche_ges}")
-    print(f"Farbwechsel: {len(muster.ebenen) - 1}")
-    for f, pfade in muster.ebenen:
-        print(f"  #{f[0]:02x}{f[1]:02x}{f[2]:02x}: "
-              f"{sum(len(pf) for pf in pfade)} Stiche, {len(pfade)} Pfade")
+    for name, _, objekte in muster.ebenen:
+        satins = sum(isinstance(o, Satin) for o in objekte)
+        print(f"  {name}: {satins} Satinsaeulen, {len(objekte) - satins} Fuellungen")
 
 
 if __name__ == "__main__":
