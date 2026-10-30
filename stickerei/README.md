@@ -5,8 +5,10 @@
 ## Voraussetzungen
 
 ```bash
-pip install pillow numpy
+pip install -r requirements.txt
 ```
+
+(`bild_zu_stick.py` braucht nur `pillow` und `numpy`.)
 
 ## Nutzung
 
@@ -46,3 +48,28 @@ python bild_zu_stick.py foto.jpg -o motiv.svg --mit-hintergrund
 
 Fotos funktionieren, Logos und Grafiken mit klaren Flächen liefern aber deutlich
 bessere Stickergebnisse.
+
+## Beispiel: Applikations-Pinguin (`pinguin.py`)
+
+Erzeugt aus `beispiele/pinguin.jpg` die Stickdatei `beispiele/pinguin.svg`
+(plus Vorschau `beispiele/pinguin.png`), Motiv 100 mm hoch, Datei inkl. 2 mm
+Rand ca. 74 × 104 mm. Für einen 10×10-Rahmen `--hoehe 95` verwenden.
+
+```bash
+python pinguin.py                # Standard: 100 mm hoch
+python pinguin.py --hoehe 90     # kleiner
+```
+
+- **Satinstich** an allen Rändern: Körperumriss (grau), Gesicht und Bauch
+  (creme), Halstuch (blau), Füße (orange), dazu Flügelnähte, Zehen und Knoten.
+  Ränder, die von einem darüberliegenden Teil verdeckt werden, entfallen.
+- **Keine Füllung** auf Körper, Gesicht, Bauch, Halstuch und Füßen –
+  diese Flächen sind als Stoff (Applikation) gedacht.
+- **Füllstich** nur für Schnabel und Augen (mit weißem Lichtpunkt),
+  Augenbrauen als schmale Satinraupe.
+- Jeder Satinrand hat eine Geradstich-Unterlage, jeder Pfad wird am Anfang und
+  Ende vernäht.
+
+Stickreihenfolge: Grau → Creme → Blau → Orange → Schwarz → Weiß (5 Farbwechsel).
+Für eine echte Applikation in Ink/Stitch vor jedem Satinrand eine
+Platzierungs- und Heftlinie einfügen und den Stoff dazwischen auflegen.
